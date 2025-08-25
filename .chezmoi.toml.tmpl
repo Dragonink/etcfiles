@@ -10,3 +10,7 @@ progress = true
 
 [edit]
 apply = true
+
+
+[data]
+rootfs = {{ promptStringOnce . "rootfs" "Root filesystem partition" | quote }}
