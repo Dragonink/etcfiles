@@ -1,0 +1,12 @@
+sourceDir = "/usr/local/share/chezmoi"
+destDir = "/"
+
+cacheDir = "/root/.cache/schezmoi"
+persistentState = {{ joinPath (osDir .chezmoi.configFile) "chezmoi.boltdb" | quote }}
+interactive = true
+verbose = true
+
+progress = true
+
+[edit]
+apply = true
