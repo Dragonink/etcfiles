@@ -1,2 +1,0 @@
-#!/bin/sh
-exec sudo --preserve-env chezmoi --config /etc/chezmoi/chezmoi.toml "$@"
