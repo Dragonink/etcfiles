@@ -4,7 +4,7 @@ def main [
 	command: string
 	kernel_version: string
 	entry_dir_abs: path
-	kernel_image: path
+	kernel_image?: path
 	...initrd: path
 ]: nothing -> nothing {
 	let entry_token = $env.KERNEL_INSTALL_ENTRY_TOKEN
