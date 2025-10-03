@@ -1,0 +1,20 @@
+#!/usr/bin/env nu
+
+def main [
+	config_path: path
+]: nothing -> nothing {
+	let config: record = (
+		open --raw $config_path
+		| ^jc --ini
+		| from json
+		| get DEFAULT
+	)
+
+	if $config.snap_type == 'BTRFS' and $config.source == '/' {
+		^kernel-install list --json short
+		| from json
+		| get version
+		| par-each { ^update-yabsnap-loaderentries --add $in $config_path }
+		| ignore
+	}
+}

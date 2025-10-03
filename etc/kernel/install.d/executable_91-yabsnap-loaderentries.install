@@ -1,0 +1,15 @@
+#!/usr/bin/env nu
+
+def main [
+	command: string
+	kernel_version: string
+	entry_dir: path
+	kernel_image?: path
+	...initrd: path
+]: nothing -> nothing {
+	if $command == 'add' {
+		^update-yabsnap-loaderentries --add $kernel_version
+	} else {
+		^update-yabsnap-loaderentries $kernel_version
+	}
+}
