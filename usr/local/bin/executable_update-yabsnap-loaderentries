@@ -1,0 +1,169 @@
+#!/usr/bin/env nu
+
+# Update boot loader entries for yabsnap
+def main [
+	--add (-a) # Generate entries
+	--boot-root (-B): path # Path to the boot partition
+	--entry-token (-E): string # Boot loader entry token
+	kernel_version: string # Version of the kernel to derive entries for
+	...yabsnap_configs: path # Set of yabsnap configurations to derive entries for
+	--verbose (-v) # Enable verbose output
+]: nothing -> nothing {
+	let verbose = (
+		$verbose
+		or ($env.KERNEL_INSTALL_VERBOSE? | default 0 | into int) > 0
+	)
+
+	let entry_dir = (
+		$boot_root
+		| default $env.KERNEL_INSTALL_BOOT_ROOT?
+		| default { ^bootctl --print-esp-path }
+		| path join 'loader' 'entries'
+	)
+	let entry_token = (
+		$entry_token
+		| default $env.KERNEL_INSTALL_ENTRY_TOKEN?
+		| default {
+			let run = ^kernel-install inspect --json short | complete
+			if $run.exit_code == 0 {
+				$run.stdout
+				| from json
+				| get EntryToken
+			}
+		}
+		| default { open /etc/machine-id | str trim }
+	)
+
+	$yabsnap_configs
+	| default --empty {
+		ls /etc/yabsnap/configs/
+		| select name
+		| insert config {
+			open --raw $in.name
+			| ^jc --ini
+			| from json
+			| get DEFAULT
+		}
+		| where config.snap_type == 'BTRFS' and config.source == '/'
+		| get name
+	}
+	| par-each { derive config $add $entry_dir $entry_token $kernel_version $verbose }
+	| ignore
+}
+
+def "derive config" [
+	add: bool
+	entry_dir: path
+	entry_token: string
+	kernel_version: string
+	verbose: bool
+]: path -> nothing {
+	let config_path = $in
+	let config_name = $config_path | path parse | get stem
+
+	let previous_entries_glob = (
+		$entry_dir
+		| path join (path yabsnap-entry $entry_token $kernel_version $config_name '*')
+	)
+	if $verbose {
+		print $"Removing ($previous_entries_glob)"
+	}
+	let previous_entries = glob $previous_entries_glob
+	if ($previous_entries | is-not-empty) {
+		rm --force --permanent ...$previous_entries
+	}
+
+	let config: record = (
+		open --raw $config_path
+		| ^jc --ini
+		| from json
+		| get DEFAULT
+	)
+	if $config.snap_type != 'BTRFS' {
+		error make --unspanned {
+			msg: $"invalid snapshot type: '($config.snap_type)' \(($config_name)\)",
+			help: "The snapshot type should be 'BTRFS'",
+		}
+	}
+	if $config.source != '/' {
+		error make --unspanned {
+			msg: $"invalid source: '($config.source)' \(($config_name)\)",
+			help: "The source should be '/'",
+		}
+	}
+
+	if $add {
+		^yabsnap --config-file $config_path list-json
+		| lines
+		| par-each {
+			from json
+			| derive snap $entry_dir $entry_token $kernel_version $config_name $verbose
+		}
+		| ignore
+	}
+}
+
+def "derive snap" [
+	entry_dir: path
+	entry_token: string
+	kernel_version: string
+	config_name: string
+	verbose: bool
+]: record -> nothing {
+	let snapshot = $in
+
+	let new_loader_entry = (
+		$entry_dir
+		| path join (path yabsnap-entry $entry_token $kernel_version $config_name $snapshot.file.timestamp)
+	)
+
+	if $verbose {
+		print $"Creating ($new_loader_entry)"
+	}
+
+	let datetime = (
+		$snapshot.file.timestamp
+		| into datetime --format '%Y%m%d%H%M%S'
+		| format date
+	)
+	let subvol = '/' + (
+		^btrfs subvolume show ($snapshot.file.prefix + $snapshot.file.timestamp)
+		| lines
+		| first
+		| str trim
+	)
+
+	const SELF = path self
+	const AWK_PROGRAM = '
+		/^# File created by\W/ {
+			printf "# File created by %s\n", script;
+			next;
+		}
+		/^title\W/ {
+			printf "%s (yabsnap \"%s\" %s)\n", $0, config, datetime;
+			next;
+		}
+		/^sort-key\W/ {
+			printf "%s-yabsnap-%s-%s\n", $0, config, timestamp;
+			next;
+		}
+		/^options\W/ {
+			printf "%s rootflags=subvol=%s ro\n", $0, subvol;
+			next;
+		}
+		{
+			print;
+		}
+	'
+	^awk -v script=($SELF) -v config=($config_name) -v datetime=($datetime) -v timestamp=($snapshot.file.timestamp) -v subvol=($subvol) $AWK_PROGRAM ($entry_dir | path join $"($entry_token)-($kernel_version).conf")
+	| save --force $new_loader_entry
+}
+
+def "path yabsnap-entry" [
+	entry_token: string
+	kernel_version: string
+	config_name: string
+	timestamp: string
+]: nothing -> string {
+	$"($entry_token)-($kernel_version)-yabsnap-($config_name)-($timestamp).conf"
+}

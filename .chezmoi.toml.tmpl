@@ -14,3 +14,4 @@ apply = true
 
 [data]
 rootfs = {{ promptStringOnce . "rootfs" "Root filesystem partition" | quote }}
+snapshotRoot = {{ promptStringOnce . "snapshotRoot" "Root directory of the snapshots" | quote }}
