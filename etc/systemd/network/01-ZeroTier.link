@@ -1,0 +1,6 @@
+[Match]
+Kind=tun
+Name=zt*
+
+[Link]
+Unmanaged=true
